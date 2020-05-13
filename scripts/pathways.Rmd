@@ -1,0 +1,218 @@
+---
+title: "Pathview Figures"
+output: html_document
+---
+
+### Load libraries
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(pathview)
+library(RColorBrewer)
+library(knitr)
+
+```
+
+### Load data
+```{r message=FALSE, warning=FALSE}
+ko <- read.table("SaanichInlet_MAG_combined_ORFs_ko.cleaned.txt") %>% 
+  dplyr::rename(orf = V1, ko = V2)
+metat_rpkm <- read_csv("SI072_SaanichInlet_10m_MAG_ORFs_RPKM.csv", col_names = F) %>% 
+  dplyr::rename(orf = X1, rpkm = X2)
+
+prokka_mag_map <- read_csv("Prokka_MAG_map.csv", col_names = F) %>% 
+  dplyr::rename(prokka_id = X1, mag = X2)
+
+arc_class <- read_tsv("gtdbtk/gtdbtk.ar122.classification_pplacer.tsv", col_names = F)
+bac_class <- read_tsv("gtdbtk/gtdbtk.bac120.classification_pplacer.tsv", col_names = F)
+gtdb_dat <- rbind(arc_class, bac_class) %>% 
+  dplyr::rename(mag = X1) %>% 
+  separate(X2, sep = ";", into = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"))
+
+checkm_dat <- read_tsv("MetaBAT2_SaanichInlet_10m_min1500_checkM_stdout.tsv") %>% 
+  dplyr::rename(mag = "Bin Id") %>% 
+  dplyr::select(mag, Completeness, Contamination)
+
+metag_rpkm <- read_csv("SaanichInlet_10m_binned.rpkm.csv") %>% 
+  mutate(Sequence_name = str_replace(Sequence_name, 'm_', 'm.')) %>% 
+  mutate(Sequence_name = str_replace(Sequence_name, 'Inlet_', 'Inlet.')) %>% 
+  separate(col = Sequence_name, into = c("mag", "contig"), sep = '_', extra = "merge") %>% 
+  group_by(Sample_name, mag) %>% 
+  summarise(g_rpkm = sum(RPKM)) %>% 
+  mutate(mag = str_replace(mag, 'Inlet.', 'Inlet_'))
+
+gtdb_dat <- dplyr::select(gtdb_dat, mag, Kingdom, Phylum, Class, Order, Family)
+
+rpkm_dat <- left_join(ko, metat_rpkm, by = "orf") %>% 
+  separate(orf, into = c("prokka_id", "orf_id")) %>% 
+  left_join(prokka_mag_map, by = "prokka_id") %>% 
+  left_join(gtdb_dat, by = "mag") %>% 
+  left_join(checkm_dat, by = "mag")
+```
+
+### Plot Pathview figures for Proteobacteria
+```{r message=FALSE, warning=FALSE}
+ko_rpkm <- rpkm_dat %>%
+  filter(Phylum %in% c("p__Proteobacteria")) %>%
+  filter(Completeness >= 90 & Contamination < 5) %>%
+  group_by(mag, ko) %>%
+  summarise(t_rpkm = sum(rpkm)) %>%
+  spread(key = mag, value = t_rpkm) %>% 
+  replace(is.na(.), 0)
+
+pv_mat <- dplyr::select(ko_rpkm, -ko)
+rownames(pv_mat) <- ko_rpkm$ko
+
+# Nitrogen metabolism
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00910",
+                   kegg.dir = ".")
+
+# Carbon metabolism
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="01200",
+                   kegg.dir = ".")
+
+# Sulfur metabolism
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00920",
+                   kegg.dir = ".")
+
+# Photosynthesis
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00195",
+                   kegg.dir = ".")
+
+# Carbon fixation 1
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00710",
+                   kegg.dir = ".")
+
+# Carbon fixation 2
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00720",
+                   kegg.dir = ".")
+
+# Glycolysis
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00010",
+                   kegg.dir = ".")
+```
+
+### Plot Pathview figures for Bacteroidota
+```{r message=FALSE, warning=FALSE}
+ko_rpkm <- rpkm_dat %>%
+  filter(Phylum %in% c("p__Bacteroidota")) %>%
+  filter(Completeness >= 90 & Contamination < 5) %>%
+  group_by(mag, ko) %>%
+  summarise(t_rpkm = sum(rpkm)) %>%
+  spread(key = mag, value = t_rpkm) %>% 
+  replace(is.na(.), 0)
+
+pv_mat <- dplyr::select(ko_rpkm, -ko)
+rownames(pv_mat) <- ko_rpkm$ko
+
+# Nitrogen metabolism
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00910",
+                   kegg.dir = ".")
+
+# Carbon metabolism
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="01200",
+                   kegg.dir = ".")
+
+# Sulfur metabolism
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00920",
+                   kegg.dir = ".")
+
+# Photosynthesis
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00195",
+                   kegg.dir = ".")
+
+# Carbon fixation 1
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00710",
+                   kegg.dir = ".")
+
+# Carbon fixation 2
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00720",
+                   kegg.dir = ".")
+
+# Glycolysis
+pv.out <- pathview(gene.data = pv_mat,
+                   limit = list(gene = c(0,10)),
+                   low = list(gene = "#91bfdb"),
+                   mid = list(gene = "#ffffbf"),
+                   high = list(gene = "#fc8d59"),
+                   species = "ko",
+                   pathway.id="00010",
+                   kegg.dir = ".")
+```

@@ -1,0 +1,315 @@
+---
+title: "Figures"
+output: html_document
+---
+
+
+### Load libraries
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(RColorBrewer)
+library(knitr)
+library(vegan)
+library(ggsci)
+library(reshape2)
+```
+
+### Set theme
+```{r message=FALSE, warning=FALSE}
+figtheme <- theme_bw() + 
+  theme(panel.border  = element_rect(colour = "black",size=2),
+        axis.title.y=element_text(margin=margin(0,15,0,0)),axis.title.x=element_text(margin=margin(15,0,0,0)),
+        plot.margin = unit(c(1,1,1,1), "cm"),
+        plot.title = element_text(margin=margin(0,0,15,0), hjust=0.5),
+        panel.grid = element_blank()
+  )
+theme_set(figtheme)
+```
+
+### Load data
+```{r message=FALSE, warning=FALSE}
+ko <- read.table("SaanichInlet_MAG_combined_ORFs_ko.cleaned.txt") %>% 
+  rename(orf = V1, ko = V2)
+metat_rpkm <- read_csv("SI072_SaanichInlet_10m_MAG_ORFs_RPKM.csv", col_names = F) %>% 
+  rename(orf = X1, rpkm = X2)
+
+prokka_mag_map <- read_csv("Prokka_MAG_map.csv", col_names = F) %>% 
+  rename(prokka_id = X1, mag = X2)
+
+arc_class <- read_tsv("gtdbtk/gtdbtk.ar122.classification_pplacer.tsv", col_names = F)
+bac_class <- read_tsv("gtdbtk/gtdbtk.bac120.classification_pplacer.tsv", col_names = F)
+gtdb_dat <- rbind(arc_class, bac_class) %>% 
+  rename(mag = X1) %>% 
+  separate(X2, sep = ";", into = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"))
+
+checkm_dat <- read_tsv("MetaBAT2_SaanichInlet_10m_min1500_checkM_stdout.tsv") %>% 
+  rename(mag = "Bin Id") %>% 
+  select(mag, Completeness, Contamination)
+
+metag_rpkm <- read_csv("SaanichInlet_10m_binned.rpkm.csv") %>% 
+  mutate(Sequence_name = str_replace(Sequence_name, 'm_', 'm.')) %>% 
+  mutate(Sequence_name = str_replace(Sequence_name, 'Inlet_', 'Inlet.')) %>% 
+  separate(col = Sequence_name, into = c("mag", "contig"), sep = '_', extra = "merge") %>% 
+  group_by(Sample_name, mag) %>% 
+  summarise(g_rpkm = sum(RPKM)) %>% 
+  mutate(mag = str_replace(mag, 'Inlet.', 'Inlet_'))
+
+gtdb_dat <- select(gtdb_dat, mag, Kingdom, Phylum, Class, Order, Family)
+
+rpkm_dat <- left_join(ko, metat_rpkm, by = "orf") %>% 
+  separate(orf, into = c("prokka_id", "orf_id")) %>% 
+  left_join(prokka_mag_map, by = "prokka_id") %>% 
+  left_join(gtdb_dat, by = "mag") %>% 
+  left_join(checkm_dat, by = "mag") %>% 
+  left_join(metag_rpkm, by = "mag")
+
+mags <-
+  left_join(metag_rpkm, gtdb_dat, by = "mag") %>% 
+  left_join(checkm_dat, by = "mag") %>% 
+  mutate_at(vars(Kingdom, Phylum, Class, Order, Family), function(x) {
+    return(str_remove(x, "[a-z]__"))
+  }) %>% 
+  filter(mag != "UNMAPPED")
+
+mags_fil <-
+  mags %>% 
+  remove_missing()
+
+dat_fil <-
+  rpkm_dat %>% 
+  mutate_at(vars(Kingdom, Phylum, Class, Order, Family), function(x) {
+    return(str_remove(x, "[a-z]__"))
+  })
+```
+
+### Plot contamination vs completeness graphs
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+ggplot(mags, aes(x = Completeness, y = Contamination)) +
+  geom_point(data = subset(mags, !is.na(Kingdom)), aes(size = g_rpkm, color = Phylum)) +
+  geom_point(data = subset(mags, is.na(Kingdom)), aes(size = g_rpkm), color = "gray") +
+  scale_color_manual(values = pal_igv()(18)) +
+  labs(x = "Completeness (%)", y = "Contamination (%)") +
+  guides(color = guide_legend(override.aes = list(size = 5), order = 1),
+         size = guide_legend(title = "RPKM", override.aes = (list(color = "black"))))
+
+ggsave("figures/cvc_full.png", width = 12, height = 8)
+
+
+ggplot(mags_fil, aes(x = Completeness, y = Contamination)) +
+  geom_point(aes(size = g_rpkm, color = Phylum)) +
+  scale_color_manual(values = pal_igv()(18)) +
+  labs(x = "Completeness (%)", y = "Contamination (%)") +
+  guides(color = guide_legend(override.aes = list(size = 5), order = 1),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/cvc_filtered.png", width = 12, height = 8)
+
+
+ggplot(dat_fil, aes(x = Completeness, y = Contamination, color = Phylum)) +
+  geom_point(aes(size = rpkm)) +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(x = "Completeness (%)", y = "Contamination (%)") +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/cvc_hq.png", width = 10, height = 8)
+```
+
+### Filter MAGs
+```{r message=FALSE, warning=FALSE}
+mags_high <- 
+  mags %>%
+  filter(Completeness >= 90 & Contamination < 5) %>% 
+  mutate(Class = str_replace(Class, "^$", "N/A"))
+
+mags_med <- 
+  mags %>%
+  filter(Completeness >= 50 & Contamination < 10) %>% 
+  mutate(Class = str_replace(Class, "^$", "N/A"))
+```
+
+### Plot phylum and class RPKMs
+```{r fig.height=8, fig.width=10, message=FALSE, warning=FALSE}
+ggplot(mags_high, aes(x = Phylum, y = g_rpkm, fill = Phylum)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(y = "RPKM")
+
+ggsave("figures/phylum_abundance_high.png", width = 10, height = 8)
+
+ggplot(mags_med, aes(x = Phylum, y = g_rpkm, fill = Phylum)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = pal_igv()(18)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "RPKM")
+
+ggsave("figures/phylum_abundance_med.png", width = 10, height = 8)
+
+ggplot(mags_high, aes(x = Class, y = g_rpkm, fill = Phylum)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(y = "RPKM") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("figures/class_abundance_high.png", width = 10, height = 8)
+
+ggplot(mags_med, aes(x = Class, y = g_rpkm, fill = Phylum)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = pal_igv()(18)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "RPKM")
+
+ggsave("figures/class_abundance_med.png", width = 10, height = 8)
+```
+
+### Load KO data
+```{r message=FALSE, warning=FALSE}
+ko_rpkm <- rpkm_dat %>%
+  filter(Completeness >= 90 & Contamination < 5) %>% 
+  group_by(Phylum, ko) %>% 
+  summarise(t_rpkm = sum(rpkm)) %>% 
+  spread(key = Phylum, value = t_rpkm) %>% 
+  replace(is.na(.), 0)
+
+ko_map <- read_table("ko_map.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";") %>% 
+  left_join(ko_rpkm, by = "ko") %>% 
+  melt() %>% 
+  rename(Phylum = variable, rpkm = value) %>% 
+  mutate(Phylum = str_remove(Phylum, "p__")) %>% 
+  filter(rpkm > 0.01)
+
+nitrogen_genes <- read_table("nitrogen_genes.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";")
+
+sulfur_genes <- read_table("sulfur_genes.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";")
+
+carbon_genes <- read_table("carbon_genes.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";")
+
+carbon_fixation_genes <- read_table("carbon_fixation.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";")
+
+carbon_fixation_photo <- read_table("carbon_fixation_photo.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";")
+
+photosynthesis_genes <- read_table("photosynthesis.txt", col_names = F) %>% 
+  rename(ko = X1, gene = X2) %>% 
+  mutate(ko = str_remove(ko, "ko:")) %>% 
+  separate(gene, into = c("Gene", "fun"), sep = ";")
+
+ko_nitrogen <- 
+  ko_map %>% 
+  filter(ko %in% nitrogen_genes$ko)
+
+ko_sulfur <- 
+  ko_map %>% 
+  filter(ko %in% sulfur_genes$ko)
+
+ko_carbon <- 
+  ko_map %>% 
+  filter(ko %in% carbon_genes$ko)
+
+ko_c_fixation <- 
+  ko_map %>% 
+  filter(ko %in% carbon_fixation_genes$ko)
+
+ko_c_fixation_photo <- 
+  ko_map %>% 
+  filter(ko %in% carbon_fixation_photo$ko)
+
+ko_photosynthesis <- 
+  ko_map %>% 
+  filter(ko %in% photosynthesis_genes$ko)
+```
+
+### Plot bubble plots
+```{r fig.height=10, fig.width=20, message=FALSE, warning=FALSE}
+ggplot(ko_carbon, aes(x = Gene, y = Phylum, color = Phylum, size = rpkm)) +
+  geom_point() +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(title = "Carbon Metabolism") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_line(size = 0.1, color = "gray"),
+        plot.title = element_text(size = 18)) +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/carbon_genes.png", width = 30, height = 6)
+```
+
+```{r fig.height=8, fig.width=11, message=FALSE, warning=FALSE}
+ggplot(ko_nitrogen, aes(x = Gene, y = Phylum, color = Phylum, size = rpkm)) +
+  geom_point() +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(title = "Nitrogen Metabolism") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_line(size = 0.1, color = "gray"),
+        plot.title = element_text(size = 18)) +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/nitrogen_genes.png", width = 10, height = 5)
+
+ggplot(ko_sulfur, aes(x = Gene, y = Phylum, color = Phylum, size = rpkm)) +
+  geom_point() +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(title = "Sulfur Metabolism") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_line(size = 0.1, color = "gray"),
+        plot.title = element_text(size = 18)) +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/sulfur_genes.png", width = 16, height = 6)
+
+ggplot(ko_c_fixation, aes(x = Gene, y = Phylum, color = Phylum, size = rpkm)) +
+  geom_point() +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(title = "Carbon Fixation in Prokaryotes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_line(size = 0.1, color = "gray"),
+        plot.title = element_text(size = 18)) +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/carbon_fixation_genes.png", width = 16, height = 6)
+
+ggplot(ko_c_fixation_photo, aes(x = Gene, y = Phylum, color = Phylum, size = rpkm)) +
+  geom_point() +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(title = "Carbon Fixation in Photosynthetic Organisms") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_line(size = 0.1, color = "gray"),
+        plot.title = element_text(size = 18)) +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/carbon_fixation_photo.png", width = 10, height = 6)
+
+ggplot(ko_photosynthesis, aes(x = Gene, y = Phylum, color = Phylum, size = rpkm)) +
+  geom_point() +
+  scale_color_manual(values = pal_npg(c("nrc"))(5)) +
+  labs(title = "Photosynthesis") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_line(size = 0.1, color = "gray"),
+        plot.title = element_text(size = 18)) +
+  guides(color = guide_legend(override.aes = list(size = 5)),
+         size = guide_legend(title = "RPKM"))
+
+ggsave("figures/photosynthesis.png", width = 10, height = 6)
+```
+
